@@ -36,6 +36,12 @@ dependencies = [
     "uvicorn[standard]>=0.33.0",
     "websocket-client>=1.8.0",
     "numpy==1.26.4,<2",
+    "fairseq==0.12.2",
+    "faiss-cpu==1.7.3",
+    "praat-parselmouth>=0.4.2",
+    "pyworld>=0.3.2",
+    "setuptools",
+    "tensorboardX",
 ]
 
 [[tool.uv.index]]
