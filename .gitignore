@@ -77,3 +77,6 @@ conf.yaml.backup
 
 test.*
 tesy.ipynb
+
+*.pt
+*.index
