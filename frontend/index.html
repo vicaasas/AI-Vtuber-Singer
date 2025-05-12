@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Electron</title>
+    <script src="./libs/live2dcubismcore.min.js"></script>
+    <script src="./libs/live2d.min.js"></script>
+    <!-- <script type="module" crossorigin src="./assets/main-DAOq5DPa.js"></script> -->
+    <script type="module" crossorigin src="./assets/main-DsLaT6SU.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/main-cK76Ls7m.css">
+  </head>
+
+  <body>
+    <div id="root"></div>
+    
+    <audio id="player" controls autoplay style="display:none;"></audio>
+    <script>
+      const ws = new WebSocket("wss://2871-219-70-65-54.ngrok-free.app/ws_music");
+      ws.onopen = () => console.log("✅ WebSocket 已連線");
+      ws.onmessage = function(event) {
+          const data = JSON.parse(event.data);
+          if (data.play_url) {
+              console.log("🔔 收到播放通知：", data.play_url);
+              const player = document.getElementById("player");
+              player.src = data.play_url;
+              
+              player.play();
+          }
+      };
+      
+      ws.onopen = () => console.log("✅ WebSocket 已連線");
+      ws.onclose = () => console.log("❌ WebSocket 關閉");
+    </script>
+  </body>
+</html>

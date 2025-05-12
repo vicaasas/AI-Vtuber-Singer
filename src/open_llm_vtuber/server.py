@@ -1,0 +1,196 @@
+import os
+import shutil
+import json
+import requests
+
+from fastapi import FastAPI, Request, WebSocket
+from starlette.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+
+from .routes import init_client_ws_route, init_webtool_routes
+from .service_context import ServiceContext
+from .config_manager.utils import Config
+
+from .only_uv5 import uvr
+from pydub import AudioSegment
+from pytubefix import YouTube
+
+
+class CustomStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if path.endswith(".js"):
+            response.headers["Content-Type"] = "application/javascript"
+        return response
+
+
+class AvatarStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        allowed_extensions = (".jpg", ".jpeg", ".png", ".gif", ".svg")
+        if not any(path.lower().endswith(ext) for ext in allowed_extensions):
+            return Response("Forbidden file type", status_code=403)
+        return await super().get_response(path, scope)
+
+
+class WebSocketServer:
+    def __init__(self, config: Config):
+        self.app = FastAPI()
+
+        # Add CORS
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        SAVE_FOLDER = os.path.join(BASE_DIR, "downloaded_music")
+        os.makedirs(SAVE_FOLDER, exist_ok=True)
+        save_root_vocal=save_root_ins=f"{SAVE_FOLDER}/sing_opt"
+
+        format0="wav"
+        # SAVE_FOLDER = "downloaded_music"
+        # os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+        active_websockets = set()
+        @self.app.websocket("/ws_music")
+        async def websocket_endpoint(websocket: WebSocket):
+            await websocket.accept()
+            active_websockets.add(websocket)
+            try:
+                while True:
+                    await websocket.receive_text()  # 可根據需要處理 client 訊息
+            except:
+                active_websockets.remove(websocket)
+
+        @self.app.post("/api/music")
+        async def get_yt_music(request: Request):
+            data = await request.json()
+            output_folder = r"C:\Users\victo\Desktop\AI\Open-LLM-VTuber\src\open_llm_vtuber\downloaded_music"
+            yt = YouTube(data['url'])
+            audio_stream = yt.streams.filter(only_audio=True).first()
+
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder)
+
+            downloaded_file = audio_stream.download(output_path=output_folder)
+
+            # 轉 mp3
+            base, _ = os.path.splitext(downloaded_file)
+            mp3_file = base + ".mp3"
+            AudioSegment.from_file(downloaded_file).export(mp3_file, format="mp3")
+            os.remove(downloaded_file)
+            print(f"✅ MP3 saved at: {mp3_file}")
+
+        @self.app.post("/callback")
+        async def receive_callback(request: Request):
+            data = await request.json()
+            print("✅ 收到 Callback 資料：")
+            with open("data.json","w", encoding="utf-8")as f: 
+                json.dump(data,f, indent=2, ensure_ascii=False)
+
+            items = data.get("data", {}).get("data", [])
+            downloaded_titles = []
+            item=items[0]
+            # for item in items:
+            title = item.get("title", "untitled").replace(" ", "_")
+            audio_url = item.get("audio_url")
+
+            if audio_url:
+                filename = os.path.join(SAVE_FOLDER, f"{title}.mp3")
+                print(f"🎵 正在下載：{filename}")
+                try:
+                    response = requests.get(audio_url)
+                    if response.status_code == 200:
+                        with open(filename, "wb") as f:
+                            f.write(response.content)
+                        print(f"✅ 下載完成：{filename}")
+
+                        uvr(save_root_vocal, filename, save_root_ins, format0)
+
+                        downloaded_titles.append(title)
+                    else:
+                        print(f"❌ 無法下載音樂，狀態碼：{response.status_code}")
+                except Exception as e:
+                    print(f"❌ 錯誤：{e}")
+
+            for ws in active_websockets.copy():
+                try:
+                    for title in downloaded_titles:
+                        await ws.send_json({
+                            "play_url": f"/music/sing_opt/vocal.mp3",
+                            "play_background_url": f"/music/sing_opt/instrument.mp3"
+                        })
+                except:
+                    active_websockets.remove(ws)
+
+            return {"status": "received"}
+        
+        self.app.mount("/music", StaticFiles(directory=SAVE_FOLDER), name="music")
+
+        # Load configurations and initialize the default context cache
+        default_context_cache = ServiceContext()
+        default_context_cache.load_from_config(config)
+
+
+        
+        # Include routes
+        self.app.include_router(
+            init_client_ws_route(default_context_cache=default_context_cache),
+        )
+        self.app.include_router(
+            init_webtool_routes(default_context_cache=default_context_cache),
+        )
+
+        # Mount cache directory first (to ensure audio file access)
+        if not os.path.exists("cache"):
+            os.makedirs("cache")
+        self.app.mount(
+            "/cache",
+            StaticFiles(directory="cache"),
+            name="cache",
+        )
+
+        # Mount static files
+        self.app.mount(
+            "/live2d-models",
+            StaticFiles(directory="live2d-models"),
+            name="live2d-models",
+        )
+        self.app.mount(
+            "/bg",
+            StaticFiles(directory="backgrounds"),
+            name="backgrounds",
+        )
+        self.app.mount(
+            "/avatars",
+            AvatarStaticFiles(directory="avatars"),
+            name="avatars",
+        )
+
+        # Mount web tool directory separately from frontend
+        self.app.mount(
+            "/web-tool",
+            CustomStaticFiles(directory="web_tool", html=True),
+            name="web_tool",
+        )
+
+        # Mount main frontend last (as catch-all)
+        self.app.mount(
+            "/",
+            CustomStaticFiles(directory="frontend", html=True),
+            name="frontend",
+        )
+
+    def run(self):
+        pass
+
+    @staticmethod
+    def clean_cache():
+        """Clean the cache directory by removing and recreating it."""
+        cache_dir = "cache"
+        if os.path.exists(cache_dir):
+            shutil.rmtree(cache_dir)
+            os.makedirs(cache_dir)

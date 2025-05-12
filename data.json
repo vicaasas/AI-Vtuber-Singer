@@ -1,0 +1,40 @@
+{
+  "code": 200,
+  "data": {
+    "callbackType": "complete",
+    "data": [
+      {
+        "audio_url": "https://apiboxfiles.erweima.ai/NzA3NzMxNzEtYmI1Ny00NGNhLTgxNzEtNDRlNmY1NDZkODJm.mp3",
+        "createTime": 1746797350410,
+        "duration": 209.12,
+        "id": "70773171-bb57-44ca-8171-44e6f546d82f",
+        "image_url": "https://apiboxfiles.erweima.ai/NzA3NzMxNzEtYmI1Ny00NGNhLTgxNzEtNDRlNmY1NDZkODJm.jpeg",
+        "model_name": "chirp-v4",
+        "prompt": "I have moved to you, now you are mine,say I love you's been in my heart,it  therewith you,let us have dreams,and lie beside you,lover's song.",
+        "source_audio_url": "https://cdn1.suno.ai/70773171-bb57-44ca-8171-44e6f546d82f.mp3",
+        "source_image_url": "https://cdn2.suno.ai/image_70773171-bb57-44ca-8171-44e6f546d82f.jpeg",
+        "source_stream_audio_url": "https://cdn1.suno.ai/70773171-bb57-44ca-8171-44e6f546d82f.mp3",
+        "stream_audio_url": "https://mfile.erweima.ai/NzA3NzMxNzEtYmI1Ny00NGNhLTgxNzEtNDRlNmY1NDZkODJm",
+        "tags": "love",
+        "title": "joy"
+      },
+      {
+        "audio_url": "https://apiboxfiles.erweima.ai/NTA0NmY4NmItMzY0Ny00ODU1LTk1ZTMtZWUyNDM5Y2FiOWRi.mp3",
+        "createTime": 1746797350410,
+        "duration": 41.72,
+        "id": "5046f86b-3647-4855-95e3-ee2439cab9db",
+        "image_url": "https://apiboxfiles.erweima.ai/NTA0NmY4NmItMzY0Ny00ODU1LTk1ZTMtZWUyNDM5Y2FiOWRi.jpeg",
+        "model_name": "chirp-v4",
+        "prompt": "I have moved to you, now you are mine,say I love you's been in my heart,it  therewith you,let us have dreams,and lie beside you,lover's song.",
+        "source_audio_url": "https://cdn1.suno.ai/5046f86b-3647-4855-95e3-ee2439cab9db.mp3",
+        "source_image_url": "https://cdn2.suno.ai/image_5046f86b-3647-4855-95e3-ee2439cab9db.jpeg",
+        "source_stream_audio_url": "https://cdn1.suno.ai/5046f86b-3647-4855-95e3-ee2439cab9db.mp3",
+        "stream_audio_url": "https://mfile.erweima.ai/NTA0NmY4NmItMzY0Ny00ODU1LTk1ZTMtZWUyNDM5Y2FiOWRi",
+        "tags": "love",
+        "title": "joy"
+      }
+    ],
+    "task_id": "39c45eb22c7b74f4113c0f77e493427e"
+  },
+  "msg": "All generated successfully."
+}
