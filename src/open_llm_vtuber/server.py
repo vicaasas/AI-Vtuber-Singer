@@ -94,8 +94,10 @@ class WebSocketServer:
             os.remove(downloaded_file)
             print(f"✅ MP3 saved at: {mp3_file}")
             # uvr(save_root_vocal, mp3_file, save_root_ins, format0)
-            batch_uvr(mp3_file)
-            
+            # batch_uvr(mp3_file)
+            for ws in active_websockets.copy():
+                await batch_uvr(mp3_file, ws)
+
             # rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
 
 
