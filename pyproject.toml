@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "ffmpeg-python==0.2.0",
+    "torchcrepe==0.0.20",
     "librosa",
     "pytubefix",
     "pydub",
