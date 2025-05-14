@@ -16,6 +16,9 @@ from .only_uv5 import uvr
 from pydub import AudioSegment
 from pytubefix import YouTube
 
+from .rvc.infer_rvc import rvc_api
+
+
 
 class CustomStaticFiles(StaticFiles):
     async def get_response(self, path, scope):
@@ -83,6 +86,9 @@ class WebSocketServer:
             AudioSegment.from_file(downloaded_file).export(mp3_file, format="mp3")
             os.remove(downloaded_file)
             print(f"✅ MP3 saved at: {mp3_file}")
+            uvr(save_root_vocal, mp3_file, save_root_ins, format0)
+            rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
+
 
         @self.app.post("/callback")
         async def receive_callback(request: Request):
@@ -109,6 +115,7 @@ class WebSocketServer:
                         print(f"✅ 下載完成：{filename}")
 
                         uvr(save_root_vocal, filename, save_root_ins, format0)
+                        rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
 
                         downloaded_titles.append(title)
                     else:
@@ -118,11 +125,11 @@ class WebSocketServer:
 
             for ws in active_websockets.copy():
                 try:
-                    for title in downloaded_titles:
-                        await ws.send_json({
-                            "play_url": f"/music/sing_opt/vocal.mp3",
-                            "play_background_url": f"/music/sing_opt/instrument.mp3"
-                        })
+                    title = downloaded_titles[0]
+                    await ws.send_json({
+                        "play_url": f"/music/sing_opt/vocal.mp3",
+                        "play_background_url": f"/music/sing_opt/instrument.mp3"
+                    })
                 except:
                     active_websockets.remove(ws)
 
