@@ -80,3 +80,5 @@ tesy.ipynb
 
 *.pt
 *.index
+
+.vscode/
