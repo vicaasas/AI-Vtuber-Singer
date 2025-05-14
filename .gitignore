@@ -81,8 +81,6 @@ tesy.ipynb
 *.pt
 *.index
 
-<<<<<<< HEAD
 .vscode/
-=======
+
 uv.lock
->>>>>>> 25497794f661e644823df59e27f8ab6c9f20e9df
