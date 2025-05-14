@@ -16,7 +16,13 @@ from .only_uv5 import uvr
 from pydub import AudioSegment
 from pytubefix import YouTube
 
-from .rvc.infer_rvc import rvc_api
+# from .rvc.infer_rvc import rvc_api
+
+import os
+import subprocess
+import math
+import librosa
+from concurrent.futures import ProcessPoolExecutor
 
 
 
@@ -86,9 +92,49 @@ class WebSocketServer:
             AudioSegment.from_file(downloaded_file).export(mp3_file, format="mp3")
             os.remove(downloaded_file)
             print(f"✅ MP3 saved at: {mp3_file}")
-            uvr(save_root_vocal, mp3_file, save_root_ins, format0)
-            rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
+            # uvr(save_root_vocal, mp3_file, save_root_ins, format0)
+            batch_uvr(mp3_file)
+            
+            # rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
 
+
+        def split_audio(path, segment_length=10, output_dir="split_clips"):
+            os.makedirs(output_dir, exist_ok=True)
+            y, sr = librosa.load(path, sr=None)
+            duration = librosa.get_duration(y=y, sr=sr)
+            n_segments = math.ceil(duration / segment_length)
+
+            segment_paths = []
+            for i in range(n_segments):
+                start = i * segment_length
+                output_path = os.path.join(output_dir, f"segment_{i:04d}.wav")
+                command = [
+                    "ffmpeg",
+                    "-y",  # overwrite
+                    "-i", path,
+                    "-ss", str(start),
+                    "-t", str(segment_length),
+                    output_path,
+                ]
+                subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                segment_paths.append(output_path)
+
+            return segment_paths
+
+        def process_segment(segment_path, idx):
+            vocal_out = f"output/my_uv5/seg_v_{idx:04d}"
+            inst_out = f"output/my_uv5/seg_i_{idx:04d}"
+            os.makedirs(vocal_out, exist_ok=True)
+            os.makedirs(inst_out, exist_ok=True)
+            uvr(vocal_out, segment_path, inst_out, agg=10, format0="wav")
+
+        def batch_uvr(paths):
+            segment_paths = split_audio(paths, segment_length=10)
+            # with ThreadPoolExecutor(max_workers=4) as executor:  # 調整 thread 數量
+            with ProcessPoolExecutor(max_workers=4) as executor:
+                for idx, seg_path in enumerate(segment_paths):
+                #     process_segment(seg_path, idx)
+                    executor.submit(process_segment, seg_path, idx)
 
         @self.app.post("/callback")
         async def receive_callback(request: Request):
@@ -114,8 +160,9 @@ class WebSocketServer:
                             f.write(response.content)
                         print(f"✅ 下載完成：{filename}")
 
-                        uvr(save_root_vocal, filename, save_root_ins, format0)
-                        rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
+                        # uvr(save_root_vocal, filename, save_root_ins, format0)
+                        batch_uvr(filename)
+                        # rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
 
                         downloaded_titles.append(title)
                     else:
