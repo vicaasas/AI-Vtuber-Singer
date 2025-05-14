@@ -10,8 +10,8 @@ def clean_path(path_str:str):
     return path_str.strip(" ").strip('\'').strip("\n").strip('"').strip(" ").strip("\u202a")
 
 
-
-weight_uvr5_root = r"C:\Users\victo\Desktop\AI\Open-LLM-VTuber\src\open_llm_vtuber\uvr5_weights"
+parent_directory = os.path.dirname(os.path.abspath(__file__))
+weight_uvr5_root = os.path.join(parent_directory, "uvr5_weights")
 model_name = "HP2-人声vocals+非人声instrumentals"
 
 device="cuda"
