@@ -12,6 +12,8 @@ from .lib.lib_v5 import spec_utils
 from .lib.lib_v5.model_param_init import ModelParameters
 from .lib.utils import inference
 
+from .rvc.infer_rvc import rvc_api
+
 
 class AudioPre:
     def __init__(self, agg, model_path, device, is_half, tta=False):
@@ -129,5 +131,10 @@ class AudioPre:
             (np.array(wav_vocals) * 32768).astype("int16"),
             self.mp.param["sr"],
         )
+
+
+        # rvc
+        rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
+
 
 
