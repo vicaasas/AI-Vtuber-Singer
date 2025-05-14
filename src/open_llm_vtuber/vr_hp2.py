@@ -42,7 +42,7 @@ class AudioPre:
         self.model = model
 
     def _path_audio_(
-        self, music_file, ins_root=None, vocal_root=None, format="flac", is_hp3=False
+        self, music_file, ins_root=None,idx=None, vocal_root=None, format="flac", is_hp3=False
     ):
         name = os.path.basename(music_file)
         if ins_root is not None:
@@ -109,7 +109,7 @@ class AudioPre:
         sf.write(
             os.path.join(
                 ins_root,
-                head + f".{format}",
+                head +idx+ f".{format}",
             ),
             (np.array(wav_instrument) * 32768).astype("int16"),
             self.mp.param["sr"],
@@ -123,18 +123,19 @@ class AudioPre:
             v_spec_m, self.mp, input_high_end_h, input_high_end_
         )
         logger.info("%s vocals done" % name)
-        sf.write(
-            os.path.join(
+        vocal_path = os.path.join(
                 vocal_root,
-                head + f".{format}",
-            ),
+                head +idx+ f".{format}",
+            )
+        sf.write(
+            vocal_path,
             (np.array(wav_vocals) * 32768).astype("int16"),
             self.mp.param["sr"],
         )
 
 
         # rvc
-        rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
+        rvc_api(dir_input=vocal_path, opt_input=vocal_path)
 
 
 

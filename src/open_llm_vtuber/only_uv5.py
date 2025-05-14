@@ -24,7 +24,7 @@ pre_fun = AudioPre(
     is_half=is_half,
 )
 
-def uvr(save_root_vocal, path, save_root_ins, format0):
+def uvr(save_root_vocal, path,idx, save_root_ins, format0):
     save_root_vocal = clean_path(save_root_vocal)
     save_root_ins = clean_path(save_root_ins)
 
@@ -40,7 +40,7 @@ def uvr(save_root_vocal, path, save_root_ins, format0):
     )
     inp_path = tmp_path
     pre_fun._path_audio_(
-        inp_path, save_root_ins, save_root_vocal, format0
+        inp_path, save_root_ins,idx, save_root_vocal, format0
     )
 
     # del pre_fun.model

@@ -59,7 +59,7 @@ class WebSocketServer:
         os.makedirs(SAVE_FOLDER, exist_ok=True)
         save_root_vocal=save_root_ins=f"{SAVE_FOLDER}/sing_opt"
 
-        format0="wav"
+        # format0="wav"
         # SAVE_FOLDER = "downloaded_music"
         # os.makedirs(SAVE_FOLDER, exist_ok=True)
 
@@ -122,11 +122,11 @@ class WebSocketServer:
             return segment_paths
 
         def process_segment(segment_path, idx):
-            vocal_out = f"output/my_uv5/seg_v_{idx:04d}"
-            inst_out = f"output/my_uv5/seg_i_{idx:04d}"
+            vocal_out = f"{save_root_vocal}"
+            inst_out = f"{save_root_ins}"
             os.makedirs(vocal_out, exist_ok=True)
             os.makedirs(inst_out, exist_ok=True)
-            uvr(vocal_out, segment_path, inst_out, agg=10, format0="wav")
+            uvr(vocal_out, segment_path,idx, inst_out, agg=10, format0="wav")
 
         def batch_uvr(paths):
             segment_paths = split_audio(paths, segment_length=10)
@@ -134,7 +134,7 @@ class WebSocketServer:
             with ProcessPoolExecutor(max_workers=4) as executor:
                 for idx, seg_path in enumerate(segment_paths):
                 #     process_segment(seg_path, idx)
-                    executor.submit(process_segment, seg_path, idx)
+                    executor.submit(process_segment, seg_path, str(idx))
 
         @self.app.post("/callback")
         async def receive_callback(request: Request):
