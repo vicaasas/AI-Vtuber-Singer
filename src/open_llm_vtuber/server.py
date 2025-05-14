@@ -22,8 +22,9 @@ import os
 import subprocess
 import math
 import librosa
-from concurrent.futures import ProcessPoolExecutor
+# from concurrent.futures import ProcessPoolExecutor
 
+import asyncio
 
 
 class CustomStaticFiles(StaticFiles):
@@ -98,7 +99,7 @@ class WebSocketServer:
             # rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
 
 
-        def split_audio(path, segment_length=10, output_dir="split_clips"):
+        def split_audio(path, segment_length=10, output_dir=os.path.join(BASE_DIR, "split_clips")):
             os.makedirs(output_dir, exist_ok=True)
             y, sr = librosa.load(path, sr=None)
             duration = librosa.get_duration(y=y, sr=sr)
@@ -121,20 +122,34 @@ class WebSocketServer:
 
             return segment_paths
 
-        def process_segment(segment_path, idx):
-            vocal_out = f"{save_root_vocal}"
-            inst_out = f"{save_root_ins}"
-            os.makedirs(vocal_out, exist_ok=True)
-            os.makedirs(inst_out, exist_ok=True)
-            uvr(vocal_out, segment_path,idx, inst_out, agg=10, format0="wav")
+        async def process_and_send(segment_path, idx, websocket):
+            loop = asyncio.get_running_loop()
 
-        def batch_uvr(paths):
-            segment_paths = split_audio(paths, segment_length=10)
-            # with ThreadPoolExecutor(max_workers=4) as executor:  # 調整 thread 數量
-            with ProcessPoolExecutor(max_workers=4) as executor:
-                for idx, seg_path in enumerate(segment_paths):
-                #     process_segment(seg_path, idx)
-                    executor.submit(process_segment, seg_path, str(idx))
+            def blocking_task():
+                # vocal_out = f"{save_root_vocal}"
+                # inst_out = f"{save_root_ins}"
+                uvr(save_root_vocal, segment_path, idx, save_root_ins, format0="wav")
+                # return vocal_out, inst_out
+
+            await loop.run_in_executor(None, blocking_task)
+
+            try:
+                await websocket.send_json({
+                    "play_url": f"/music/sing_opt/vocal_{idx}.wav",
+                    "play_background_url": f"/music/sing_opt/instrument_{idx}.wav"
+                })
+            except:
+                print(f"⚠️ 無法傳送第 {idx} 段 WebSocket")
+
+        async def batch_uvr(filename, websocket):
+            segment_paths = split_audio(filename, segment_length=10)
+            # tasks = []
+            # for idx, seg_path in enumerate(segment_paths):
+            #     task = asyncio.create_task(process_and_send(seg_path, str(idx), websocket))
+            #     tasks.append(task)
+            # await asyncio.gather(*tasks)
+            for idx, seg_path in enumerate(segment_paths):
+                await process_and_send(seg_path, str(idx), websocket)
 
         @self.app.post("/callback")
         async def receive_callback(request: Request):
@@ -144,7 +159,7 @@ class WebSocketServer:
                 json.dump(data,f, indent=2, ensure_ascii=False)
 
             items = data.get("data", {}).get("data", [])
-            downloaded_titles = []
+            # downloaded_titles = []
             item=items[0]
             # for item in items:
             title = item.get("title", "untitled").replace(" ", "_")
@@ -160,25 +175,13 @@ class WebSocketServer:
                             f.write(response.content)
                         print(f"✅ 下載完成：{filename}")
 
-                        # uvr(save_root_vocal, filename, save_root_ins, format0)
-                        batch_uvr(filename)
-                        # rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
+                        for ws in active_websockets.copy():
+                            await batch_uvr(filename, ws)
 
-                        downloaded_titles.append(title)
                     else:
                         print(f"❌ 無法下載音樂，狀態碼：{response.status_code}")
                 except Exception as e:
                     print(f"❌ 錯誤：{e}")
-
-            for ws in active_websockets.copy():
-                try:
-                    title = downloaded_titles[0]
-                    await ws.send_json({
-                        "play_url": f"/music/sing_opt/vocal.mp3",
-                        "play_background_url": f"/music/sing_opt/instrument.mp3"
-                    })
-                except:
-                    active_websockets.remove(ws)
 
             return {"status": "received"}
         
