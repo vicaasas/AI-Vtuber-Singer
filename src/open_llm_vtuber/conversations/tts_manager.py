@@ -11,7 +11,7 @@ from ..live2d_model import Live2dModel
 from ..tts.tts_interface import TTSInterface
 from ..utils.stream_audio import prepare_audio_payload
 from .types import WebSocketSend
-
+from src.open_llm_vtuber.rvc.infer_rvc import rvc_api_single
 
 class TTSTaskManager:
     """Manages TTS tasks and ensures ordered delivery to frontend while allowing parallel TTS generation"""
@@ -140,6 +140,7 @@ class TTSTaskManager:
         audio_file_path = None
         try:
             audio_file_path = await self._generate_audio(tts_engine, tts_text)
+            rvc_api_single(input_pth=audio_file_path, output_pth=audio_file_path)
             payload = prepare_audio_payload(
                 audio_path=audio_file_path,
                 display_text=display_text,

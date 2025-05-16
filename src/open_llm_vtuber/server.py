@@ -78,7 +78,7 @@ class WebSocketServer:
         @self.app.post("/api/music")
         async def get_yt_music(request: Request):
             data = await request.json()
-            output_folder = r"C:\Users\victo\Desktop\AI\Open-LLM-VTuber\src\open_llm_vtuber\downloaded_music"
+            output_folder = r".\src\open_llm_vtuber\downloaded_music"
             yt = YouTube(data['url'])
             audio_stream = yt.streams.filter(only_audio=True).first()
 
