@@ -137,8 +137,9 @@ class WebSocketServer:
 
             try:
                 await websocket.send_json({
-                    "play_url": f"/music/sing_opt/vocal_{idx}.wav",
-                    "play_background_url": f"/music/sing_opt/instrument_{idx}.wav"
+                    "id":idx,
+                    "play_url": f"/music/sing_opt/vocal{idx}.wav",
+                    "play_background_url": f"/music/sing_opt/instrument{idx}.wav"
                 })
             except:
                 print(f"⚠️ 無法傳送第 {idx} 段 WebSocket")

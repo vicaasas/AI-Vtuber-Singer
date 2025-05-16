@@ -354,7 +354,7 @@ def rvc_api_single(input_pth:str, output_pth:str):
             tgt_sr, audio_opt = opt
             if format1 in ["wav", "flac", "mp3", "ogg", "aac"]:
                 sf.write(
-                    "%s/%s.%s" % (os.path.dirname(output_pth), os.path.basename(output_pth), format1),
+                    "%s/%s" % (os.path.dirname(output_pth), os.path.basename(output_pth)),
                     audio_opt,
                     tgt_sr,
                 )
