@@ -12,7 +12,7 @@ from .lib.lib_v5 import spec_utils
 from .lib.lib_v5.model_param_init import ModelParameters
 from .lib.utils import inference
 
-from .rvc.infer_rvc import rvc_api
+from .rvc.infer_rvc import rvc_api_single
 
 
 class AudioPre:
@@ -135,7 +135,7 @@ class AudioPre:
 
 
         # rvc
-        rvc_api(dir_input=vocal_path, opt_input=vocal_path)
+        rvc_api_single(input_pth=vocal_path, output_pth=vocal_path)
 
 
 

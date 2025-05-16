@@ -79,6 +79,10 @@ config = Config()
 
 hubert_model = None
 
+# 禁用 fairseq 的 logging
+import logging
+logging.getLogger("fairseq").setLevel(logging.WARNING)
+
 def load_hubert():
     global hubert_model
     # hubert_base.pt 需要去額外下載
@@ -94,6 +98,9 @@ def load_hubert():
     else:
         hubert_model = hubert_model.float()
     hubert_model.eval()
+
+load_hubert()
+
 
 
 weight_root = f"{current_dir}/weights"
@@ -113,6 +120,7 @@ rms_mix_rate1 = 1 # src跟pred音量融合比例 (src:0~pred:1)
 protect1 = 0.33 # 防止電音撕裂音，越低越保留原始音訊
 format1 = "wav" # 輸出格式
 crepe_hop_length = 120
+
 
 def get_vc(sid, to_return_protect0, to_return_protect1):
     global n_spk, tgt_sr, net_g, vc, cpt, version
@@ -146,6 +154,8 @@ def get_vc(sid, to_return_protect0, to_return_protect1):
         to_return_protect0,
         to_return_protect1,
     )
+
+vc_data = get_vc(sid, protect1, 0.33)
 
 def vc_single(
     sid,
@@ -257,7 +267,6 @@ def vc_multi(
     format1,
     crepe_hop_length,
 ):
-    print("!!!!")
     try:
         dir_path = (
             dir_path.strip(" ").strip('"').strip("\n").strip('"').strip(" ")
@@ -320,9 +329,60 @@ def vc_multi(
     except:
         yield traceback.format_exc()
 
-def rvc_api(dir_input="vocal_sep", opt_input="vocal_opt"):
-    dir_input = dir_input
-    opt_input = opt_input
+def rvc_api_single(input_pth:str, output_pth:str):
+    
+    vc_data = get_vc(sid, protect1, 0.33)
+    info, opt = vc_single(
+                    spk_item,
+                    input_pth,
+                    None,
+                    vc_transform1,
+                    None,
+                    f0method1,
+                    file_index3,
+                    file_index4,
+                    # file_big_npy,
+                    index_rate2,
+                    filter_radius1,
+                    resample_sr1,
+                    rms_mix_rate1,
+                    protect1,
+                    crepe_hop_length
+                )
+    if "Success" in info:
+        try:
+            tgt_sr, audio_opt = opt
+            if format1 in ["wav", "flac", "mp3", "ogg", "aac"]:
+                sf.write(
+                    "%s/%s.%s" % (os.path.dirname(output_pth), os.path.basename(output_pth), format1),
+                    audio_opt,
+                    tgt_sr,
+                )
+            else:
+                path = "%s/%s.wav" % (os.path.dirname(output_pth), os.path.basename(output_pth))
+                sf.write(
+                    path,
+                    audio_opt,
+                    tgt_sr,
+                )
+                if os.path.exists(path):
+                    os.system(
+                        "ffmpeg -i %s -vn %s -q:a 2 -y"
+                        % (path, path[:-4] + ".%s" % format1)
+                    )
+        except:
+            info += traceback.format_exc()
+    # os.path.basename
+    """
+    範例
+        path3 = "data/test/file.csv"
+        print(os.path.basename(path3))  # 输出: file.csv
+    """
+    
+
+def rvc_api_multi(input_dir="vocal_sep", output_dir="vocal_opt"):
+    dir_input = input_dir
+    opt_input = output_dir
     vc_data = get_vc(sid, protect1, 0.33)
     vc_output3 = vc_multi(  spk_item,
                             dir_input,

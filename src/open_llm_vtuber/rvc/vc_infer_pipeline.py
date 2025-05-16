@@ -19,6 +19,9 @@ bh, ah = signal.butter(N=5, Wn=48, btype="high", fs=16000) #建立一個高通�
 input_audio_path2wav = {}
 
 
+from .rmvpe import RMVPE
+
+
 @lru_cache
 def cache_harvest_f0(input_audio_path, fs, f0max, f0min, frame_period):
     audio = input_audio_path2wav[input_audio_path]
@@ -73,6 +76,10 @@ class VC(object):
         self.t_center = self.sr * self.x_center  # 查询切点位置
         self.t_max = self.sr * self.x_max  # 免查询时长阈值
         self.device = config.device
+        rmvpe_path = os.path.join(os.path.dirname(__file__), "rmvpe.pt")
+        self.model_rmvpe = RMVPE(
+                rmvpe_path, is_half=self.is_half, device=self.device
+        )
 
     # Fork Feature: Get the best torch device to use for f0 algorithms that require a torch device. Will return the type (torch.device)
     def get_optimal_torch_device(self, index: int = 0) -> torch.device:
@@ -316,12 +323,13 @@ class VC(object):
             )
         elif f0_method == "rmvpe":
             if hasattr(self, "model_rmvpe") == False:
-                from .rmvpe import RMVPE
+                # from .rmvpe import RMVPE
                 rmvpe_path = os.path.join(os.path.dirname(__file__), "rmvpe.pt")
                 print("loading rmvpe model")
-                self.model_rmvpe = RMVPE(
-                    rmvpe_path, is_half=self.is_half, device=self.device
-                )
+                if self.model_rmvpe is None:
+                    self.model_rmvpe = RMVPE(
+                        rmvpe_path, is_half=self.is_half, device=self.device
+                    )
             f0 = self.model_rmvpe.infer_from_audio(x, thred=0.03)
 
         elif "hybrid" in f0_method:
