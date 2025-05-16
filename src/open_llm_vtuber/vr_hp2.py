@@ -97,45 +97,48 @@ class AudioPre:
         y_spec_m = pred * X_phase
         v_spec_m = X_spec_m - y_spec_m
 
-        input_high_end_ = spec_utils.mirroring(
-            self.data["high_end_process"], y_spec_m, input_high_end, self.mp
-        )
-        wav_instrument = spec_utils.cmb_spectrogram_to_wave(
-            y_spec_m, self.mp, input_high_end_h, input_high_end_
-        )
-       
-        logger.info("%s instruments done" % name)
-        head = "instrument"
-        sf.write(
-            os.path.join(
-                ins_root,
-                head +idx+ f".{format}",
-            ),
-            (np.array(wav_instrument) * 32768).astype("int16"),
-            self.mp.param["sr"],
-        )  #
 
-        head = "vocal"
-        input_high_end_ = spec_utils.mirroring(
-            self.data["high_end_process"], v_spec_m, input_high_end, self.mp
-        )
-        wav_vocals = spec_utils.cmb_spectrogram_to_wave(
-            v_spec_m, self.mp, input_high_end_h, input_high_end_
-        )
-        logger.info("%s vocals done" % name)
-        vocal_path = os.path.join(
-                vocal_root,
-                head +idx+ f".{format}",
+        try:
+            input_high_end_ = spec_utils.mirroring(
+                self.data["high_end_process"], y_spec_m, input_high_end, self.mp
             )
-        sf.write(
-            vocal_path,
-            (np.array(wav_vocals) * 32768).astype("int16"),
-            self.mp.param["sr"],
-        )
+            wav_instrument = spec_utils.cmb_spectrogram_to_wave(
+                y_spec_m, self.mp, input_high_end_h, input_high_end_
+            )
+        
+            logger.info("%s instruments done" % name)
+            head = "instrument"
+            sf.write(
+                os.path.join(
+                    ins_root,
+                    head +idx+ f".{format}",
+                ),
+                (np.array(wav_instrument) * 32768).astype("int16"),
+                self.mp.param["sr"],
+            )  #
+
+            head = "vocal"
+            input_high_end_ = spec_utils.mirroring(
+                self.data["high_end_process"], v_spec_m, input_high_end, self.mp
+            )
+            wav_vocals = spec_utils.cmb_spectrogram_to_wave(
+                v_spec_m, self.mp, input_high_end_h, input_high_end_
+            )
+            logger.info("%s vocals done" % name)
+            vocal_path = os.path.join(
+                    vocal_root,
+                    head +idx+ f".{format}",
+                )
+            sf.write(
+                vocal_path,
+                (np.array(wav_vocals) * 32768).astype("int16"),
+                self.mp.param["sr"],
+            )
 
 
-        # rvc
-        rvc_api_single(input_pth=vocal_path, output_pth=vocal_path)
-
+            # rvc
+            rvc_api_single(input_pth=vocal_path, output_pth=vocal_path)
+        except:
+            pass
 
 
