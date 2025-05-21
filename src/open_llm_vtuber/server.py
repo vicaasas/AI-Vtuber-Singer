@@ -25,7 +25,7 @@ import librosa
 # from concurrent.futures import ProcessPoolExecutor
 
 import asyncio
-
+import socket
 
 class CustomStaticFiles(StaticFiles):
     async def get_response(self, path, scope):
@@ -124,7 +124,7 @@ class WebSocketServer:
 
             return segment_paths
 
-        async def process_and_send(segment_path, idx, websocket):
+        async def process_and_send(segment_path, idx, websocket, isEnd):
             loop = asyncio.get_running_loop()
 
             def blocking_task():
@@ -138,8 +138,9 @@ class WebSocketServer:
             try:
                 await websocket.send_json({
                     "id":idx,
-                    "play_url": f"/music/sing_opt/vocal{idx}.wav",
-                    "play_background_url": f"/music/sing_opt/instrument{idx}.wav"
+                    "play_url": f"http://"+websocket.headers.get("host", "")+f"/music/sing_opt/vocal{idx}.wav",
+                    "play_background_url": f"http://"+websocket.headers.get("host", "")+f"/music/sing_opt/instrument{idx}.wav",
+                    "isEnd":isEnd
                 })
             except:
                 print(f"⚠️ 無法傳送第 {idx} 段 WebSocket")
@@ -152,7 +153,7 @@ class WebSocketServer:
             #     tasks.append(task)
             # await asyncio.gather(*tasks)
             for idx, seg_path in enumerate(segment_paths):
-                await process_and_send(seg_path, str(idx), websocket)
+                await process_and_send(seg_path, str(idx), websocket, idx == len(segment_paths)-1)
 
         @self.app.post("/callback")
         async def receive_callback(request: Request):
