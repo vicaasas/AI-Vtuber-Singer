@@ -2,6 +2,7 @@
 
 import os
 from .vr_hp2 import AudioPre
+import subprocess
 
 def clean_path(path_str:str):
     if path_str.endswith(('\\','/')):
@@ -35,9 +36,11 @@ def uvr(save_root_vocal, path,idx, save_root_ins, format0):
         os.path.join(os.environ["TEMP"]),
         os.path.basename(inp_path),
     )
-    os.system(
-        f'ffmpeg -i "{inp_path}" -vn -acodec pcm_s16le -ac 2 -ar 44100 "{tmp_path}" -y'
-    )
+    # os.system(
+    #     f'ffmpeg -i "{inp_path}" -vn -acodec pcm_s16le -ac 2 -ar 44100 "{tmp_path}" -y'
+    # )
+    subprocess.run(f'ffmpeg -i "{inp_path}" -vn -acodec pcm_s16le -ac 2 -ar 44100 "{tmp_path}" -y', shell=True)
+
     inp_path = tmp_path
     pre_fun._path_audio_(
         inp_path, save_root_ins,idx, save_root_vocal, format0
