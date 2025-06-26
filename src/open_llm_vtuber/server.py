@@ -133,6 +133,7 @@ class WebSocketServer:
             return segment_paths
 
         async def process_and_send(segment_path, idx, websocket, isEnd):
+            
             loop = asyncio.get_running_loop()
 
             def blocking_task():
@@ -154,7 +155,7 @@ class WebSocketServer:
                 print(f"⚠️ 無法傳送第 {idx} 段 WebSocket")
 
         async def batch_uvr(filename, websocket):
-            segment_paths = split_audio(filename, segment_length=10)
+            segment_paths = split_audio(filename, segment_length=15)
             # tasks = []
             # for idx, seg_path in enumerate(segment_paths):
             #     task = asyncio.create_task(process_and_send(seg_path, str(idx), websocket))

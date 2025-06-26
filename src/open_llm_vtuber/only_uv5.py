@@ -1,8 +1,12 @@
 # python tools/uvr5/webui.py 0 False 8654 False
 
 import os
+import torch
+torch.set_num_threads(1)  # 降低每個推論任務的 CPU 用量
+
 from .vr_hp2 import AudioPre
 import subprocess
+
 
 def clean_path(path_str:str):
     if path_str.endswith(('\\','/')):
@@ -16,10 +20,10 @@ weight_uvr5_root = os.path.join(parent_directory, "uvr5_weights")
 model_name = "HP2-人声vocals+非人声instrumentals"
 
 device="cuda"
-is_half=True
+is_half=False
 
 pre_fun = AudioPre(
-    agg=int(10),
+    agg=int(5),
     model_path=os.path.join(weight_uvr5_root, model_name + ".pth"),
     device=device,
     is_half=is_half,
@@ -36,10 +40,10 @@ def uvr(save_root_vocal, path,idx, save_root_ins, format0):
         os.path.join(os.environ["TEMP"]),
         os.path.basename(inp_path),
     )
-    # os.system(
-    #     f'ffmpeg -i "{inp_path}" -vn -acodec pcm_s16le -ac 2 -ar 44100 "{tmp_path}" -y'
-    # )
-    subprocess.run(f'ffmpeg -i "{inp_path}" -vn -acodec pcm_s16le -ac 2 -ar 44100 "{tmp_path}" -y', shell=True)
+    os.system(
+        f'ffmpeg -i "{inp_path}" -vn -acodec pcm_s16le -ac 2 -ar 44100 "{tmp_path}" -y'
+    )
+    # subprocess.run(f'ffmpeg -i "{inp_path}" -vn -acodec pcm_s16le -ac 2 -ar 44100 "{tmp_path}" -y', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     inp_path = tmp_path
     pre_fun._path_audio_(

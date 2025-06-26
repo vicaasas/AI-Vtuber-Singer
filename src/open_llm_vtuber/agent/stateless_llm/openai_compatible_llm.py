@@ -148,12 +148,13 @@ class AsyncLLM(StatelessLLMInterface):
                 temperature=self.temperature,
                 tools=tools,
                 # tool_choice="none"
-                tool_choice={
-                    "type": "function",
-                    "function": {
-                        "name": "generate_song"
-                    }
-                }
+                tool_choice="auto"
+                # tool_choice={
+                #     "type": "function",
+                #     "function": {
+                #         "name": "generate_song"
+                #     }
+                # }
             )
             tool_call_args = ""
             collecting_tool_args = False

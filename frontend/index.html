@@ -15,7 +15,7 @@
     
     <audio id="player" controls autoplay style="display:none;"></audio>
     <script>
-      const ws = new WebSocket("wss://a86f-219-70-65-54.ngrok-free.app/ws_music");
+      const ws = new WebSocket("wss://5799-219-70-65-54.ngrok-free.app/ws_music");
       ws.onopen = () => console.log("✅ WebSocket 已連線");
       ws.onmessage = function(event) {
           const data = JSON.parse(event.data);
