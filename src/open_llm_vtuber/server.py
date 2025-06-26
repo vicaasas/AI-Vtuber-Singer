@@ -86,6 +86,7 @@ class WebSocketServer:
             data = await request.json()
             output_folder = SAVE_FOLDER
             yt = YouTube(data['url'])
+            id = data['id']
             audio_stream = yt.streams.filter(only_audio=True).first()
 
             if not os.path.exists(output_folder):
@@ -101,9 +102,10 @@ class WebSocketServer:
             print(f"✅ MP3 saved at: {mp3_file}")
             # uvr(save_root_vocal, mp3_file, save_root_ins, format0)
             # batch_uvr(mp3_file)
-            for id,ws in active_websockets.copy().items():
-                await batch_uvr(mp3_file, ws)
-
+            for cid,ws in active_websockets.copy().items():
+                if(id==cid):
+                    await batch_uvr(mp3_file, ws)
+                
             # rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
 
 
