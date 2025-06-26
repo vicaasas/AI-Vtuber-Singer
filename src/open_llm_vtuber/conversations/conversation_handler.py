@@ -1,6 +1,7 @@
 import asyncio
 import json
 from typing import Dict, Optional, Callable
+import time
 
 import numpy as np
 from fastapi import WebSocket
@@ -9,7 +10,7 @@ from loguru import logger
 from ..chat_group import ChatGroupManager
 from ..chat_history_manager import store_message
 from ..service_context import ServiceContext
-from .group_conversation import process_group_conversation
+from .group_conversation import process_group_conversation, process_batch_group_conversation
 from .single_conversation import process_single_conversation
 from .conversation_utils import EMOJI_LIST
 from .types import GroupConversationState
@@ -50,26 +51,20 @@ async def handle_conversation_trigger(
 
     group = chat_group_manager.get_client_group(client_uid)
     if group and len(group.members) > 1:
-        # Use group_id as task key for group conversations
-        task_key = group.group_id
-        if (
-            task_key not in current_conversation_tasks
-            or current_conversation_tasks[task_key].done()
-        ):
-            logger.info(f"Starting new group conversation for {task_key}")
-
-            current_conversation_tasks[task_key] = asyncio.create_task(
-                process_group_conversation(
-                    client_contexts=client_contexts,
-                    client_connections=client_connections,
-                    broadcast_func=broadcast_to_group,
-                    group_members=group.members,
-                    initiator_client_uid=client_uid,
-                    user_input=user_input,
-                    images=images,
-                    session_emoji=session_emoji,
-                )
-            )
+        # Handle batch group conversation
+        await handle_batch_group_conversation(
+            group_id=group.group_id,
+            client_uid=client_uid,
+            user_input=user_input,
+            context=context,
+            client_contexts=client_contexts,
+            client_connections=client_connections,
+            broadcast_to_group=broadcast_to_group,
+            group_members=list(group.members),
+            images=images,
+            session_emoji=session_emoji,
+            current_conversation_tasks=current_conversation_tasks,
+        )
     else:
         # Use client_uid as task key for individual conversations
         current_conversation_tasks[client_uid] = asyncio.create_task(
@@ -82,6 +77,154 @@ async def handle_conversation_trigger(
                 session_emoji=session_emoji,
             )
         )
+
+
+async def handle_batch_group_conversation(
+    group_id: str,
+    client_uid: str,
+    user_input: str,
+    context: ServiceContext,
+    client_contexts: Dict[str, ServiceContext],
+    client_connections: Dict[str, WebSocket],
+    broadcast_to_group: Callable,
+    group_members: list,
+    images: Optional[dict],
+    session_emoji: str,
+    current_conversation_tasks: Dict[str, Optional[asyncio.Task]],
+) -> None:
+    """Handle batch group conversation with 7-second collection window"""
+    
+    # Get or create conversation state
+    state = GroupConversationState.get_state(group_id)
+    if not state:
+        # Convert set to list if needed
+        members_list = list(group_members) if isinstance(group_members, set) else group_members
+        state = GroupConversationState(
+            group_id=group_id,
+            session_emoji=session_emoji,
+            group_queue=members_list,
+            memory_index={uid: 0 for uid in members_list},
+        )
+    
+    # Skip AI speak signals for batch processing
+    if isinstance(user_input, str) and user_input == "":
+        return
+    
+    # Process user input to text
+    if isinstance(user_input, np.ndarray):
+        # Convert audio to text using ASR
+        from .conversation_utils import process_user_input
+        text_input = await process_user_input(
+            user_input, context.asr_engine, client_connections[client_uid].send_text
+        )
+    else:
+        text_input = user_input
+    
+    # Get user name from context
+    user_name = context.character_config.human_name or "Human"
+    
+    # Add message to batch
+    state.add_batch_message(user_name, text_input, client_uid)
+    logger.info(f"Added message to batch for group {group_id}: {user_name}: {text_input}")
+    
+    # Convert set to list if needed for broadcasting
+    members_list = list(group_members) if isinstance(group_members, set) else group_members
+    
+    # Broadcast the message to other group members immediately
+    await broadcast_to_group(
+        members_list,
+        {
+            "type": "user-input-transcription", 
+            "text": text_input,
+            "user_name": user_name,
+        },
+        client_uid,
+    )
+    
+    # Cancel existing timer if it exists
+    if state.batch_timer_task and not state.batch_timer_task.done():
+        state.batch_timer_task.cancel()
+    
+    # Start new 7-second timer if not already processing
+    if not state.is_processing_batch:
+        state.batch_timer_task = asyncio.create_task(
+            batch_timer_handler(
+                group_id=group_id,
+                client_contexts=client_contexts,
+                client_connections=client_connections,
+                broadcast_to_group=broadcast_to_group,
+                group_members=members_list,
+                images=images,
+                current_conversation_tasks=current_conversation_tasks,
+            )
+        )
+
+
+async def batch_timer_handler(
+    group_id: str,
+    client_contexts: Dict[str, ServiceContext],
+    client_connections: Dict[str, WebSocket],
+    broadcast_to_group: Callable,
+    group_members: list,
+    images: Optional[dict],
+    current_conversation_tasks: Dict[str, Optional[asyncio.Task]],
+) -> None:
+    """Handle the 7-second batch timer"""
+    try:
+        await asyncio.sleep(7.0)  # Wait 7 seconds
+        
+        state = GroupConversationState.get_state(group_id)
+        if not state or len(state.batch_messages) == 0:
+            logger.info(f"No messages to process for group {group_id}")
+            return
+        
+        # Mark as processing to prevent new timers
+        state.is_processing_batch = True
+        
+        logger.info(f"Processing batch for group {group_id} with {len(state.batch_messages)} messages")
+        
+        # Start batch conversation task
+        task_key = group_id
+        try:
+            current_conversation_tasks[task_key] = asyncio.create_task(
+                process_batch_group_conversation(
+                    group_id=group_id,
+                    client_contexts=client_contexts,
+                    client_connections=client_connections,
+                    broadcast_func=broadcast_to_group,
+                    group_members=group_members,
+                    images=images,
+                    session_emoji=state.session_emoji,
+                )
+            )
+            logger.info(f"Batch conversation task created for group {group_id}")
+            
+            # Wait for the task to complete and handle any errors
+            await current_conversation_tasks[task_key]
+            logger.info(f"Batch conversation task completed for group {group_id}")
+            
+        except Exception as e:
+            logger.error(f"Error in batch conversation task for group {group_id}: {e}", exc_info=True)
+            # Reset processing state on error
+            if state:
+                state.is_processing_batch = False
+            raise
+        finally:
+            # Clean up task reference
+            current_conversation_tasks.pop(task_key, None)
+        
+    except asyncio.CancelledError:
+        logger.info(f"Batch timer cancelled for group {group_id}")
+        # Reset processing state on cancellation
+        state = GroupConversationState.get_state(group_id)
+        if state:
+            state.is_processing_batch = False
+    except Exception as e:
+        logger.error(f"Error in batch timer handler for group {group_id}: {e}", exc_info=True)
+        # Reset processing state on error
+        state = GroupConversationState.get_state(group_id)
+        if state:
+            state.is_processing_batch = False
 
 
 async def handle_individual_interrupt(

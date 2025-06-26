@@ -4,6 +4,7 @@ import json
 from loguru import logger
 from fastapi import WebSocket
 import numpy as np
+import re
 
 from .conversation_utils import (
     create_batch_input,
@@ -21,7 +22,358 @@ from .types import (
 )
 from ..service_context import ServiceContext
 from ..chat_history_manager import store_message
-from .tts_manager import TTSTaskManager
+from .tts_manager import TTSTaskManager, GroupTTSTaskManager
+
+
+async def process_batch_group_conversation(
+    group_id: str,
+    client_contexts: Dict[str, ServiceContext],
+    client_connections: Dict[str, WebSocket],
+    broadcast_func: BroadcastFunc,
+    group_members: List[str],
+    images: Optional[List[Dict[str, Any]]] = None,
+    session_emoji: str = np.random.choice(EMOJI_LIST),
+) -> None:
+    """Process batch group conversation with collected messages
+    
+    Args:
+        group_id: ID of the group
+        client_contexts: Dictionary of client contexts
+        client_connections: Dictionary of client WebSocket connections
+        broadcast_func: Function to broadcast messages to group
+        group_members: List of group member UIDs
+        images: Optional list of image data
+        session_emoji: Emoji identifier for the conversation
+    """
+    
+    state = GroupConversationState.get_state(group_id)
+    if not state or len(state.batch_messages) == 0:
+        logger.warning(f"No batch messages found for group {group_id}")
+        return
+    
+    # Convert to list if it's a set and ensure we have members
+    members_list = list(group_members) if isinstance(group_members, set) else group_members
+    if not members_list:
+        logger.error(f"No group members found for group {group_id}")
+        return
+    
+    # Select the first available AI to respond (you can modify this logic)
+    responding_ai_uid = members_list[0]
+    responding_context = client_contexts.get(responding_ai_uid)
+    
+    if not responding_context:
+        logger.error(f"No context found for responding AI {responding_ai_uid}")
+        await broadcast_func(
+            members_list,
+            {
+                "type": "error",
+                "message": f"No AI context found for {responding_ai_uid}",
+            },
+        )
+        return
+    
+    logger.info(f"Selected AI {responding_ai_uid} to respond for group {group_id}")
+    
+    # Use GroupTTSTaskManager for broadcasting audio to all members
+    tts_manager = GroupTTSTaskManager(
+        broadcast_func=broadcast_func,
+        group_members=members_list,
+        responding_client_uid=responding_ai_uid,
+    )
+    
+    try:
+        logger.info(f"Batch Group Conversation {session_emoji} started for group {group_id}!")
+        
+        # Format batch messages for LLM
+        formatted_input = state.format_batch_messages()
+        logger.info(f"Formatted batch input: {formatted_input}")
+        
+        # Broadcast thinking state
+        await broadcast_func(
+            members_list,
+            {"type": "control", "text": "conversation-chain-start"},
+        )
+        await broadcast_func(
+            members_list,
+            {"type": "full-text", "text": "Processing messages..."},
+        )
+        
+        # Initialize group conversation context
+        try:
+            init_group_conversation_contexts(client_contexts)
+            logger.info("Group conversation contexts initialized")
+        except Exception as e:
+            logger.error(f"Error initializing group conversation contexts: {e}")
+        
+        # Store messages in history for all group members
+        try:
+            for msg in state.batch_messages:
+                for member_uid in members_list:
+                    if member_uid in client_contexts:
+                        member_context = client_contexts[member_uid]
+                        store_message(
+                            conf_uid=member_context.character_config.conf_uid,
+                            history_uid=member_context.history_uid,
+                            role="human",
+                            content=msg.content,
+                            name=msg.user_name,
+                        )
+            logger.info(f"Stored {len(state.batch_messages)} messages in history for all group members")
+        except Exception as e:
+            logger.error(f"Error storing messages in history: {e}")
+        
+        # Create batch input for AI
+        try:
+            batch_input = create_batch_input(
+                input_text=formatted_input,
+                images=images,
+                from_name="Human"
+            )
+            logger.info("Batch input created successfully")
+        except Exception as e:
+            logger.error(f"Error creating batch input: {e}")
+            raise
+        
+        # Process AI response with group TTS manager
+        responding_ws_send = client_connections[responding_ai_uid].send_text
+        logger.info(f"Starting AI response processing for {responding_ai_uid}")
+        
+        full_response = await process_ai_response(
+            context=responding_context,
+            batch_input=batch_input,
+            websocket_send=responding_ws_send,
+            tts_manager=tts_manager,
+        )
+        
+        logger.info(f"AI response received: {full_response[:100]}..." if len(full_response) > 100 else f"AI response received: {full_response}")
+        
+        # Handle TTS completion
+        if tts_manager.task_list:
+            logger.info(f"Processing {len(tts_manager.task_list)} TTS tasks")
+            await asyncio.gather(*tts_manager.task_list)
+            # Broadcast backend-synth-complete to all group members
+            await broadcast_func(
+                members_list,
+                {"type": "backend-synth-complete"},
+            )
+
+            broadcast_ctx = BroadcastContext(
+                broadcast_func=broadcast_func,
+                group_members=members_list,
+                current_client_uid=responding_ai_uid,
+            )
+
+            await finalize_conversation_turn(
+                tts_manager=tts_manager,
+                websocket_send=responding_ws_send,
+                client_uid=responding_ai_uid,
+                broadcast_ctx=broadcast_ctx,
+            )
+        else:
+            logger.info("No TTS tasks to process")
+            # Send conversation end signal even if no TTS
+            await broadcast_func(
+                members_list,
+                {"type": "control", "text": "conversation-chain-end"},
+            )
+        
+        # Store AI response in history for all group members
+        if full_response:
+            try:
+                for member_uid in members_list:
+                    if member_uid in client_contexts:
+                        member_context = client_contexts[member_uid]
+                        store_message(
+                            conf_uid=member_context.character_config.conf_uid,
+                            history_uid=member_context.history_uid,
+                            role="ai",
+                            content=full_response,
+                            name=responding_context.character_config.character_name,
+                            avatar=responding_context.character_config.avatar,
+                        )
+                logger.info("AI response stored in history for all group members")
+            except Exception as e:
+                logger.error(f"Error storing AI response in history: {e}")
+        else:
+            logger.warning("No AI response to store")
+        
+        # Clear processed messages and reset state
+        state.clear_batch_messages()
+        state.is_processing_batch = False
+        
+        logger.info(f"Batch Group Conversation {session_emoji} completed successfully!")
+        
+    except asyncio.CancelledError:
+        logger.info(f"🤡👍 Batch Group Conversation {session_emoji} cancelled because interrupted.")
+        # Send end signal on cancellation
+        try:
+            await broadcast_func(
+                members_list,
+                {"type": "control", "text": "conversation-chain-end"},
+            )
+        except Exception as e:
+            logger.error(f"Error sending end signal on cancellation: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error in batch group conversation: {e}", exc_info=True)
+        try:
+            await broadcast_func(
+                members_list,
+                {
+                    "type": "error",
+                    "message": f"Error in batch conversation: {str(e)}",
+                },
+            )
+            # Send end signal on error
+            await broadcast_func(
+                members_list,
+                {"type": "control", "text": "conversation-chain-end"},
+            )
+        except Exception as broadcast_error:
+            logger.error(f"Error broadcasting error message: {broadcast_error}")
+        raise
+    finally:
+        # Cleanup
+        try:
+            cleanup_conversation(tts_manager, session_emoji)
+            logger.info("TTS manager cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up TTS manager: {e}")
+        
+        # Reset processing state
+        if state:
+            state.is_processing_batch = False
+            logger.info("Processing state reset")
+
+
+async def process_group_agent_output(
+    output: Any,
+    context: ServiceContext,
+    tts_manager: GroupTTSTaskManager,
+    responding_ws_send: WebSocketSend,
+) -> str:
+    """Process agent output for group conversations with broadcasting support"""
+    from ..agent.output_types import SentenceOutput, AudioOutput
+    
+    # Set character info
+    output.display_text.name = context.character_config.character_name
+    output.display_text.avatar = context.character_config.avatar
+
+    full_response = ""
+    try:
+        if isinstance(output, SentenceOutput):
+            # Handle SentenceOutput type
+            async for display_text, tts_text, actions in output:
+                logger.debug(f"🏃 Processing group sentence output: '''{tts_text}'''...")
+
+                # Apply translation if needed
+                if context.translate_engine:
+                    if len(re.sub(r'[\s.,!?，。！？\'"』」）】\s]+', "", tts_text)):
+                        tts_text = context.translate_engine.translate(tts_text)
+                    logger.info(f"🏃 Text after translation: '''{tts_text}'''...")
+
+                full_response += display_text.text
+                
+                # Use the group TTS manager which will broadcast to all members
+                await tts_manager.speak(
+                    tts_text=tts_text,
+                    display_text=display_text,
+                    actions=actions,
+                    live2d_model=context.live2d_model,
+                    tts_engine=context.tts_engine,
+                    websocket_send=responding_ws_send,  # This is used for fallback/logging
+                )
+                
+        elif isinstance(output, AudioOutput):
+            # Handle AudioOutput type
+            async for audio_path, display_text, transcript, actions in output:
+                logger.debug(f"🏃 Processing group audio output: '''{transcript}'''...")
+                full_response += transcript
+                
+                # For AudioOutput, we need to broadcast the prepared payload directly
+                from ..utils.stream_audio import prepare_audio_payload
+                audio_payload = prepare_audio_payload(
+                    audio_path=audio_path,
+                    display_text=display_text,
+                    actions=actions.to_dict() if actions else None,
+                )
+                # Broadcast to all group members using the TTS manager's broadcast method
+                await tts_manager._broadcast_audio_payload(audio_payload)
+        else:
+            logger.warning(f"Unknown output type in group conversation: {type(output)}")
+
+    except Exception as e:
+        logger.error(f"Error processing group agent output: {e}", exc_info=True)
+        # Send error to responding AI only (not broadcast)
+        try:
+            await responding_ws_send(json.dumps({
+                "type": "error",
+                "message": f"Error processing response: {str(e)}"
+            }))
+        except Exception as ws_error:
+            logger.error(f"Error sending websocket error message: {ws_error}")
+        raise
+
+    return full_response
+
+
+async def process_ai_response(
+    context: ServiceContext,
+    batch_input: Any,
+    websocket_send: WebSocketSend,
+    tts_manager: TTSTaskManager,
+) -> str:
+    """Process AI response for batch input"""
+    full_response = ""
+
+    try:
+        logger.info("Starting agent engine chat")
+        agent_output = context.agent_engine.chat(batch_input)
+        logger.info("Agent engine chat initiated successfully")
+
+        # Check if we're using GroupTTSTaskManager for group conversations
+        if isinstance(tts_manager, GroupTTSTaskManager):
+            async for output in agent_output:
+                logger.debug(f"Processing group agent output: {output}")
+                response_part = await process_group_agent_output(
+                    output=output,
+                    context=context,
+                    tts_manager=tts_manager,
+                    responding_ws_send=websocket_send,
+                )
+                full_response += response_part
+                logger.debug(f"Group response part processed: {response_part}")
+        else:
+            # Use regular processing for individual conversations
+            async for output in agent_output:
+                logger.debug(f"Processing agent output: {output}")
+                response_part = await process_agent_output(
+                    output=output,
+                    character_config=context.character_config,
+                    live2d_model=context.live2d_model,
+                    tts_engine=context.tts_engine,
+                    websocket_send=websocket_send,
+                    tts_manager=tts_manager,
+                    translate_engine=context.translate_engine,
+                )
+                full_response += response_part
+                logger.debug(f"Response part processed: {response_part}")
+
+        logger.info(f"AI response processing completed. Total response length: {len(full_response)}")
+
+    except Exception as e:
+        logger.error(f"Error processing AI response: {e}", exc_info=True)
+        # Send error message to websocket
+        try:
+            await websocket_send(json.dumps({
+                "type": "error",
+                "message": f"Error processing AI response: {str(e)}"
+            }))
+        except Exception as ws_error:
+            logger.error(f"Error sending websocket error message: {ws_error}")
+        raise
+
+    return full_response
 
 
 async def process_group_conversation(

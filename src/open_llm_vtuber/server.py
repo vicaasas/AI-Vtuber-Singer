@@ -25,7 +25,8 @@ import librosa
 # from concurrent.futures import ProcessPoolExecutor
 
 import asyncio
-import socket
+from uuid import uuid4
+import time
 
 class CustomStaticFiles(StaticFiles):
     async def get_response(self, path, scope):
@@ -64,16 +65,21 @@ class WebSocketServer:
         # SAVE_FOLDER = "downloaded_music"
         # os.makedirs(SAVE_FOLDER, exist_ok=True)
 
-        active_websockets = set()
+        active_websockets = {}
         @self.app.websocket("/ws_music")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()
-            active_websockets.add(websocket)
+            id = str(uuid4())
+            await websocket.send_json({
+                "type":"init",
+                "id": id
+            })
+            active_websockets[id] = websocket
             try:
                 while True:
                     await websocket.receive_text()  # 可根據需要處理 client 訊息
             except:
-                active_websockets.remove(websocket)
+                active_websockets.pop(id, None)
 
         @self.app.post("/api/music")
         async def get_yt_music(request: Request):
@@ -95,7 +101,7 @@ class WebSocketServer:
             print(f"✅ MP3 saved at: {mp3_file}")
             # uvr(save_root_vocal, mp3_file, save_root_ins, format0)
             # batch_uvr(mp3_file)
-            for ws in active_websockets.copy():
+            for id,ws in active_websockets.copy().items():
                 await batch_uvr(mp3_file, ws)
 
             # rvc_api(dir_input=save_root_vocal, opt_input=save_root_ins)
@@ -180,7 +186,7 @@ class WebSocketServer:
                             f.write(response.content)
                         print(f"✅ 下載完成：{filename}")
 
-                        for ws in active_websockets.copy():
+                        for ws in active_websockets.copy().items():
                             await batch_uvr(filename, ws)
 
                     else:
@@ -190,7 +196,25 @@ class WebSocketServer:
 
             return {"status": "received"}
         
+        @self.app.post("/sing")
+        async def singExist(request: Request):
+            data = await request.json()
+            target_id = data['id']
+            ws = active_websockets.get(target_id)
+
+            for idx in range(18):
+                await asyncio.sleep(2)  # 非阻塞暫停
+                await ws.send_json({
+                    "id": idx,
+                    "play_url": f"http://{ws.headers.get('host', '')}/music/sing_opt/vocal{idx}.wav",
+                    "play_background_url": f"http://{ws.headers.get('host', '')}/music/sing_opt/instrument{idx}.wav",
+                    "isEnd": idx == 17  # 最後一段才是 True
+                })
+
         self.app.mount("/music", StaticFiles(directory=SAVE_FOLDER), name="music")
+        
+
+        
 
         # Load configurations and initialize the default context cache
         default_context_cache = ServiceContext()

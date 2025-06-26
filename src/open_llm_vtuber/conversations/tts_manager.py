@@ -3,14 +3,14 @@ import json
 import re
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Callable, Awaitable
 from loguru import logger
 
 from ..agent.output_types import DisplayText, Actions
 from ..live2d_model import Live2dModel
 from ..tts.tts_interface import TTSInterface
 from ..utils.stream_audio import prepare_audio_payload
-from .types import WebSocketSend
+from .types import WebSocketSend, BroadcastFunc
 from src.open_llm_vtuber.rvc.infer_rvc import rvc_api_single
 
 class TTSTaskManager:
@@ -181,3 +181,164 @@ class TTSTaskManager:
         self._next_sequence_to_send = 0
         # Create a new queue to clear any pending items
         self._payload_queue = asyncio.Queue()
+
+class GroupTTSTaskManager(TTSTaskManager):
+    """
+    TTS Task Manager for group conversations that broadcasts audio to all group members.
+    Extends TTSTaskManager to support group broadcasting functionality.
+    """
+
+    def __init__(
+        self, 
+        broadcast_func: BroadcastFunc, 
+        group_members: List[str], 
+        responding_client_uid: str
+    ) -> None:
+        super().__init__()
+        self.broadcast_func = broadcast_func
+        self.group_members = group_members
+        self.responding_client_uid = responding_client_uid
+
+    async def speak(
+        self,
+        tts_text: str,
+        display_text: DisplayText,
+        actions: Optional[Actions],
+        live2d_model: Live2dModel,
+        tts_engine: TTSInterface,
+        websocket_send: WebSocketSend,
+    ) -> None:
+        """
+        Queue a TTS task for group conversation with broadcasting to all members.
+        """
+        if len(re.sub(r'[\s.,!?，。！？\'"』」）】\s]+', "", tts_text)) == 0:
+            logger.debug("Empty TTS text, sending silent display payload to group")
+            # Get current sequence number for silent payload
+            current_sequence = self._sequence_counter
+            self._sequence_counter += 1
+
+            # Start sender task if not running
+            if not self._sender_task or self._sender_task.done():
+                self._sender_task = asyncio.create_task(
+                    self._process_group_payload_queue()
+                )
+
+            await self._send_silent_group_payload(display_text, actions, current_sequence)
+            return
+
+        logger.debug(
+            f"🏃Queuing Group TTS task for: '''{tts_text}''' (by {display_text.name})"
+        )
+
+        # Get current sequence number
+        current_sequence = self._sequence_counter
+        self._sequence_counter += 1
+
+        # Start sender task if not running
+        if not self._sender_task or self._sender_task.done():
+            self._sender_task = asyncio.create_task(
+                self._process_group_payload_queue()
+            )
+
+        # Create and queue the TTS task
+        task = asyncio.create_task(
+            self._process_group_tts(
+                tts_text=tts_text,
+                display_text=display_text,
+                actions=actions,
+                live2d_model=live2d_model,
+                tts_engine=tts_engine,
+                sequence_number=current_sequence,
+            )
+        )
+        self.task_list.append(task)
+
+    async def _process_group_payload_queue(self) -> None:
+        """
+        Process and broadcast payloads to all group members in correct order.
+        """
+        buffered_payloads: Dict[int, Dict] = {}
+
+        while True:
+            try:
+                # Get payload from queue
+                payload, sequence_number = await self._payload_queue.get()
+                buffered_payloads[sequence_number] = payload
+
+                # Send payloads in order to all group members
+                while self._next_sequence_to_send in buffered_payloads:
+                    next_payload = buffered_payloads.pop(self._next_sequence_to_send)
+                    
+                    # Broadcast to all group members
+                    await self._broadcast_audio_payload(next_payload)
+                    
+                    self._next_sequence_to_send += 1
+
+                self._payload_queue.task_done()
+
+            except asyncio.CancelledError:
+                break
+
+    async def _broadcast_audio_payload(self, payload: Dict) -> None:
+        """Broadcast audio payload to all group members"""
+        try:
+            # Use the broadcast function to send to all group members
+            await self.broadcast_func(
+                self.group_members,
+                payload,
+                None,  # Don't exclude anyone from audio
+            )
+            logger.debug(f"Broadcasted audio payload to {len(self.group_members)} group members")
+        except Exception as e:
+            logger.error(f"Error broadcasting audio payload: {e}")
+
+    async def _send_silent_group_payload(
+        self,
+        display_text: DisplayText,
+        actions: Optional[Actions],
+        sequence_number: int,
+    ) -> None:
+        """Queue a silent audio payload for group broadcast"""
+        audio_payload = prepare_audio_payload(
+            audio_path=None,
+            display_text=display_text,
+            actions=actions,
+        )
+        await self._payload_queue.put((audio_payload, sequence_number))
+
+    async def _process_group_tts(
+        self,
+        tts_text: str,
+        display_text: DisplayText,
+        actions: Optional[Actions],
+        live2d_model: Live2dModel,
+        tts_engine: TTSInterface,
+        sequence_number: int,
+    ) -> None:
+        """Process TTS generation and queue the result for group broadcast"""
+        audio_file_path = None
+        try:
+            audio_file_path = await self._generate_audio(tts_engine, tts_text)
+            rvc_api_single(input_pth=audio_file_path, output_pth=audio_file_path)
+            payload = prepare_audio_payload(
+                audio_path=audio_file_path,
+                display_text=display_text,
+                actions=actions,
+            )
+            # Queue the payload with its sequence number
+            await self._payload_queue.put((payload, sequence_number))
+
+        except Exception as e:
+            logger.error(f"Error preparing group audio payload: {e}")
+            # Queue silent payload for error case
+            payload = prepare_audio_payload(
+                audio_path=None,
+                display_text=display_text,
+                actions=actions,
+            )
+            await self._payload_queue.put((payload, sequence_number))
+
+        finally:
+            if audio_file_path:
+                tts_engine.remove_file(audio_file_path)
+                logger.debug("Group audio cache file cleaned.")
