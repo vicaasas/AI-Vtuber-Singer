@@ -288,9 +288,11 @@ class GroupTTSTaskManager(TTSTaskManager):
                 payload,
                 None,  # Don't exclude anyone from audio
             )
-            logger.debug(f"Broadcasted audio payload to {len(self.group_members)} group members")
+            logger.debug(f"Broadcasted audio payload to {len(self.group_members)} group members: {self.group_members}")
+            logger.debug(f"Payload type: {payload.get('type')}, has audio: {payload.get('audio') is not None}, display_text: {payload.get('display_text', {}).get('text', 'N/A') if payload.get('display_text') else 'N/A'}")
         except Exception as e:
             logger.error(f"Error broadcasting audio payload: {e}")
+            raise
 
     async def _send_silent_group_payload(
         self,
