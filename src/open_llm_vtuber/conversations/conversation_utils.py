@@ -166,7 +166,18 @@ async def finalize_conversation_turn(
     """Finalize a conversation turn"""
     if tts_manager.task_list:
         await asyncio.gather(*tts_manager.task_list)
+        
+        # Send backend-synth-complete to both individual client and group
         await websocket_send(json.dumps({"type": "backend-synth-complete"}))
+        
+        # If this is a group conversation, also broadcast to all members
+        if broadcast_ctx and broadcast_ctx.broadcast_func and broadcast_ctx.group_members:
+            await broadcast_ctx.broadcast_func(
+                broadcast_ctx.group_members,
+                {"type": "backend-synth-complete"},
+                None,  # Don't exclude anyone from this signal
+            )
+            logger.debug(f"Broadcasted backend-synth-complete to all {len(broadcast_ctx.group_members)} group members in finalize")
 
         response = await message_handler.wait_for_response(
             client_uid, "frontend-playback-complete"
@@ -176,8 +187,10 @@ async def finalize_conversation_turn(
             logger.warning(f"No playback completion response from {client_uid}")
             return
 
+    # Send force-new-message to responding client
     await websocket_send(json.dumps({"type": "force-new-message"}))
 
+    # Broadcast force-new-message to group if applicable
     if broadcast_ctx and broadcast_ctx.broadcast_func:
         await broadcast_ctx.broadcast_func(
             broadcast_ctx.group_members,

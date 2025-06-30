@@ -151,11 +151,8 @@ async def process_batch_group_conversation(
         if tts_manager.task_list:
             logger.info(f"Processing {len(tts_manager.task_list)} TTS tasks")
             await asyncio.gather(*tts_manager.task_list)
-            # Broadcast backend-synth-complete to all group members
-            await broadcast_func(
-                members_list,
-                {"type": "backend-synth-complete"},
-            )
+            # Note: backend-synth-complete will be broadcasted in finalize_conversation_turn
+            logger.debug(f"TTS tasks completed, proceeding to finalize conversation turn")
 
             broadcast_ctx = BroadcastContext(
                 broadcast_func=broadcast_func,
@@ -176,26 +173,10 @@ async def process_batch_group_conversation(
                 members_list,
                 {"type": "control", "text": "conversation-chain-end"},
             )
+            logger.debug(f"Broadcasted conversation-chain-end to all {len(members_list)} group members")
         
-        # Store AI response in history for all group members
-        if full_response:
-            try:
-                for member_uid in members_list:
-                    if member_uid in client_contexts:
-                        member_context = client_contexts[member_uid]
-                        store_message(
-                            conf_uid=member_context.character_config.conf_uid,
-                            history_uid=member_context.history_uid,
-                            role="ai",
-                            content=full_response,
-                            name=responding_context.character_config.character_name,
-                            avatar=responding_context.character_config.avatar,
-                        )
-                logger.info("AI response stored in history for all group members")
-            except Exception as e:
-                logger.error(f"Error storing AI response in history: {e}")
-        else:
-            logger.warning("No AI response to store")
+        # AI response processing completed. Agent engine has automatically stored the response.
+        logger.info("AI response processing completed. Agent engine has automatically stored the response.")
         
         # Clear processed messages and reset state
         state.clear_batch_messages()
@@ -295,7 +276,8 @@ async def process_group_agent_output(
                 audio_payload = prepare_audio_payload(
                     audio_path=audio_path,
                     display_text=display_text,
-                    actions=actions.to_dict() if actions else None,
+                    actions=actions,
+                    forwarded=False,
                 )
                 # Broadcast to all group members using the TTS manager's broadcast method
                 await tts_manager._broadcast_audio_payload(audio_payload)
@@ -304,14 +286,26 @@ async def process_group_agent_output(
 
     except Exception as e:
         logger.error(f"Error processing group agent output: {e}", exc_info=True)
-        # Send error to responding AI only (not broadcast)
+        # Broadcast error to all group members instead of just responding AI
         try:
-            await responding_ws_send(json.dumps({
-                "type": "error",
-                "message": f"Error processing response: {str(e)}"
-            }))
-        except Exception as ws_error:
-            logger.error(f"Error sending websocket error message: {ws_error}")
+            await tts_manager.broadcast_func(
+                tts_manager.group_members,
+                {
+                    "type": "error",
+                    "message": f"Error processing response: {str(e)}"
+                },
+                None,  # Don't exclude anyone from error notification
+            )
+        except Exception as broadcast_error:
+            logger.error(f"Error broadcasting error message: {broadcast_error}")
+            # Fallback to responding AI only if broadcast fails
+            try:
+                await responding_ws_send(json.dumps({
+                    "type": "error",
+                    "message": f"Error processing response: {str(e)}"
+                }))
+            except Exception as ws_error:
+                logger.error(f"Error sending websocket error message: {ws_error}")
         raise
 
     return full_response
