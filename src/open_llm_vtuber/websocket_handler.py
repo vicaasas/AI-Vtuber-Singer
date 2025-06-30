@@ -65,6 +65,7 @@ class WebSocketHandler:
         """Initialize the WebSocket handler with default context"""
         self.client_connections: Dict[str, WebSocket] = {}
         self.client_contexts: Dict[str, ServiceContext] = {}
+        self.client_users:Dict[str,WSUser] = {}
         self.chat_group_manager = ChatGroupManager()
         self.current_conversation_tasks: Dict[str, Optional[asyncio.Task]] = {}
         self.default_context_cache = default_context_cache
@@ -96,7 +97,7 @@ class WebSocketHandler:
         }
 
     async def handle_new_connection(
-        self, websocket: WebSocket, client_uid: str
+        self, websocket: WebSocket, client_uid: str,client_name:str
     ) -> None:
         """
         Handle new WebSocket connection setup
@@ -112,11 +113,11 @@ class WebSocketHandler:
             session_service_context = await self._init_service_context()
 
             await self._store_client_data(
-                websocket, client_uid, session_service_context
+                websocket, client_uid, client_name,session_service_context
             )
 
             await self._send_initial_messages(
-                websocket, client_uid, session_service_context
+                websocket, client_uid, client_name,session_service_context
             )
 
             logger.info(f"Connection established for client {client_uid}")
@@ -132,10 +133,12 @@ class WebSocketHandler:
         self,
         websocket: WebSocket,
         client_uid: str,
+        client_name:str,
         session_service_context: ServiceContext,
     ):
         """Store client data and initialize group status"""
         self.client_connections[client_uid] = websocket
+        self.client_users[client_uid] = WSUser(client_uid,client_name)
         self.client_contexts[client_uid] = session_service_context
         self.received_data_buffers[client_uid] = np.array([])
 
@@ -146,6 +149,7 @@ class WebSocketHandler:
         self,
         websocket: WebSocket,
         client_uid: str,
+        client_name:str,
         session_service_context: ServiceContext,
     ):
         """Send initial connection messages to the client"""
@@ -161,6 +165,7 @@ class WebSocketHandler:
                     "conf_name": session_service_context.character_config.conf_name,
                     "conf_uid": session_service_context.character_config.conf_uid,
                     "client_uid": client_uid,
+                    "client_name":client_name
                 }
             )
         )
@@ -290,6 +295,7 @@ class WebSocketHandler:
         # Clean up other client data
         self.client_connections.pop(client_uid, None)
         self.client_contexts.pop(client_uid, None)
+        self.client_users.pop(client_uid, None)
         self.received_data_buffers.pop(client_uid, None)
         if client_uid in self.current_conversation_tasks:
             task = self.current_conversation_tasks[client_uid]
@@ -551,3 +557,10 @@ class WebSocketHandler:
     ) -> None:
         """Handle group info request"""
         await self.send_group_update(websocket, client_uid)
+
+class WSUser():
+    client_uid:str
+    client_name:str
+    def __init__(self, client_uid, client_name):
+        self.client_uid = client_uid
+        self.client_name = client_name
