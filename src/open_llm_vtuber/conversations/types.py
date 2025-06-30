@@ -104,7 +104,8 @@ class GroupConversationState:
         
         formatted_messages = []
         for i, msg in enumerate(self.batch_messages, 1):
-            formatted_messages.append(f"{i}.〔{msg.user_name}:{msg.content}〕")
+            # Format: number. [UserName: message content]
+            formatted_messages.append(f"{i}. [{msg.user_name}: {msg.content}]")
         
         return "\n".join(formatted_messages)
 

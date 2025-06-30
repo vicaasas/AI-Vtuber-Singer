@@ -33,6 +33,7 @@ async def process_batch_group_conversation(
     group_members: List[str],
     images: Optional[List[Dict[str, Any]]] = None,
     session_emoji: str = np.random.choice(EMOJI_LIST),
+    client_users: Dict[str, object] = None,
 ) -> None:
     """Process batch group conversation with collected messages
     
@@ -44,6 +45,7 @@ async def process_batch_group_conversation(
         group_members: List of group member UIDs
         images: Optional list of image data
         session_emoji: Emoji identifier for the conversation
+        client_users: Dictionary of WSUser objects
     """
     
     state = GroupConversationState.get_state(group_id)
@@ -100,7 +102,7 @@ async def process_batch_group_conversation(
         
         # Initialize group conversation context
         try:
-            init_group_conversation_contexts(client_contexts)
+            init_group_conversation_contexts(client_contexts, client_users, members_list)
             logger.info("Group conversation contexts initialized")
         except Exception as e:
             logger.error(f"Error initializing group conversation contexts: {e}")
@@ -379,6 +381,7 @@ async def process_group_conversation(
     user_input: Union[str, np.ndarray],
     images: Optional[List[Dict[str, Any]]] = None,
     session_emoji: str = np.random.choice(EMOJI_LIST),
+    client_users: Dict[str, object] = None,
 ) -> None:
     """Process group conversation
 
@@ -391,6 +394,7 @@ async def process_group_conversation(
         user_input: Text or audio input from user
         images: Optional list of image data
         session_emoji: Emoji identifier for the conversation
+        client_users: Dictionary of WSUser objects
     """
     # Create TTSTaskManager for each member
     tts_managers = {uid: TTSTaskManager() for uid in group_members}
@@ -409,24 +413,30 @@ async def process_group_conversation(
         )
 
         # Initialize group conversation context for each AI
-        init_group_conversation_contexts(client_contexts)
+        init_group_conversation_contexts(client_contexts, client_users, group_members)
 
-        # Get human name from initiator context
-        initiator_context = client_contexts.get(initiator_client_uid)
-        human_name = (
-            initiator_context.character_config.human_name
-            if initiator_context
-            else "Human"
-        )
+        # Get human name from WSUser or fallback to initiator context
+        human_name = "Human"  # Default fallback
+        if client_users and initiator_client_uid in client_users:
+            human_name = client_users[initiator_client_uid].client_name
+        else:
+            initiator_context = client_contexts.get(initiator_client_uid)
+            if initiator_context and hasattr(initiator_context, 'character_config'):
+                human_name = (
+                    initiator_context.character_config.human_name
+                    if initiator_context.character_config.human_name
+                    else "Human"
+                )
 
         # Process initial input
         input_text = await process_group_input(
             user_input=user_input,
-            initiator_context=initiator_context,
+            initiator_context=client_contexts.get(initiator_client_uid),
             initiator_ws_send=client_connections[initiator_client_uid].send_text,
             broadcast_func=broadcast_func,
             group_members=group_members,
             initiator_client_uid=initiator_client_uid,
+            client_users=client_users,
         )
 
         for member_uid in group_members:
@@ -494,15 +504,29 @@ def init_group_conversation_state(
 
 def init_group_conversation_contexts(
     client_contexts: Dict[str, ServiceContext],
+    client_users: Dict[str, object] = None,
+    group_members: List[str] = None,
 ) -> None:
     """Initialize group conversation context for each AI participant"""
     ai_names = [ctx.character_config.character_name for ctx in client_contexts.values()]
+    
+    # Get all human names from WSUser objects for group members only
+    human_names = []
+    if client_users and group_members:
+        for uid in group_members:
+            if uid in client_users and uid not in client_contexts:
+                # This is a human user (has WSUser but no AI context)
+                human_names.append(client_users[uid].client_name)
+    
+    # If no human names found, use default
+    if not human_names:
+        human_names = ["Human"]
 
     for context in client_contexts.values():
         agent = context.agent_engine
         if hasattr(agent, "start_group_conversation"):
             agent.start_group_conversation(
-                human_name="Human",
+                human_name=", ".join(human_names) if len(human_names) > 1 else human_names[0],
                 ai_participants=[
                     name
                     for name in ai_names
@@ -511,7 +535,7 @@ def init_group_conversation_contexts(
             )
             logger.debug(
                 f"Initialized group conversation context for "
-                f"{context.character_config.character_name}"
+                f"{context.character_config.character_name} with humans: {human_names}"
             )
 
 
@@ -522,13 +546,22 @@ async def process_group_input(
     broadcast_func: BroadcastFunc,
     group_members: List[str],
     initiator_client_uid: str,
+    client_users: Dict[str, object] = None,
 ) -> str:
     """Process and broadcast user input to group"""
     input_text = await process_user_input(
         user_input, initiator_context.asr_engine, initiator_ws_send
     )
+    
+    # Get user name for broadcasting
+    user_name = "Human"  # Default fallback
+    if client_users and initiator_client_uid in client_users:
+        user_name = client_users[initiator_client_uid].client_name
+    elif hasattr(initiator_context, 'character_config') and initiator_context.character_config.human_name:
+        user_name = initiator_context.character_config.human_name
+    
     await broadcast_transcription(
-        broadcast_func, group_members, input_text, initiator_client_uid
+        broadcast_func, group_members, input_text, initiator_client_uid, user_name
     )
     return input_text
 
@@ -538,6 +571,7 @@ async def broadcast_transcription(
     group_members: List[str],
     text: str,
     exclude_uid: str,
+    user_name: str = "Human",
 ) -> None:
     """Broadcast transcription to group members"""
     await broadcast_func(
@@ -545,6 +579,7 @@ async def broadcast_transcription(
         {
             "type": "user-input-transcription",
             "text": text,
+            "user_name": user_name,
         },
         exclude_uid,
     )

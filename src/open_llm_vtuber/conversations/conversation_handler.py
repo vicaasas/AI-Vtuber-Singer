@@ -28,6 +28,7 @@ async def handle_conversation_trigger(
     received_data_buffers: Dict[str, np.ndarray],
     current_conversation_tasks: Dict[str, Optional[asyncio.Task]],
     broadcast_to_group: Callable,
+    client_users: Dict[str, object] = None,
 ) -> None:
     """Handle triggers that start a conversation"""
     if msg_type == "ai-speak-signal":
@@ -64,6 +65,7 @@ async def handle_conversation_trigger(
             images=images,
             session_emoji=session_emoji,
             current_conversation_tasks=current_conversation_tasks,
+            client_users=client_users,
         )
     else:
         # Use client_uid as task key for individual conversations
@@ -91,6 +93,7 @@ async def handle_batch_group_conversation(
     images: Optional[dict],
     session_emoji: str,
     current_conversation_tasks: Dict[str, Optional[asyncio.Task]],
+    client_users: Dict[str, object] = None,
 ) -> None:
     """Handle batch group conversation with 7-second collection window"""
     
@@ -120,8 +123,12 @@ async def handle_batch_group_conversation(
     else:
         text_input = user_input
     
-    # Get user name from context
-    user_name = context.character_config.human_name or "Human"
+    # Get user name from WSUser or fallback to context
+    user_name = "Human"  # Default fallback
+    if client_users and client_uid in client_users:
+        user_name = client_users[client_uid].client_name
+    elif hasattr(context, 'character_config') and context.character_config.human_name:
+        user_name = context.character_config.human_name
     
     # Add message to batch
     state.add_batch_message(user_name, text_input, client_uid)
@@ -156,6 +163,7 @@ async def handle_batch_group_conversation(
                 group_members=members_list,
                 images=images,
                 current_conversation_tasks=current_conversation_tasks,
+                client_users=client_users,
             )
         )
 
@@ -168,6 +176,7 @@ async def batch_timer_handler(
     group_members: list,
     images: Optional[dict],
     current_conversation_tasks: Dict[str, Optional[asyncio.Task]],
+    client_users: Dict[str, object] = None,
 ) -> None:
     """Handle the 7-second batch timer"""
     try:
@@ -195,6 +204,7 @@ async def batch_timer_handler(
                     group_members=group_members,
                     images=images,
                     session_emoji=state.session_emoji,
+                    client_users=client_users,
                 )
             )
             logger.info(f"Batch conversation task created for group {group_id}")

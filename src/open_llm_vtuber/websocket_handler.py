@@ -503,6 +503,7 @@ class WebSocketHandler:
             received_data_buffers=self.received_data_buffers,
             current_conversation_tasks=self.current_conversation_tasks,
             broadcast_to_group=self.broadcast_to_group,
+            client_users=self.client_users,
         )
 
     async def _handle_fetch_configs(
