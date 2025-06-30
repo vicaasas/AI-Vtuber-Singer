@@ -94,6 +94,7 @@ class WebSocketHandler:
             "switch-config": self._handle_config_switch,
             "fetch-backgrounds": self._handle_fetch_backgrounds,
             "audio-play-start": self._handle_audio_play_start,
+            "change-client-name":self._handle_change_client_name
         }
 
     async def handle_new_connection(
@@ -551,6 +552,12 @@ class WebSocketHandler:
                 await self.broadcast_to_group(
                     group_members, silent_payload, exclude_uid=client_uid
                 )
+
+    async def _handle_change_client_name(
+        self, websocket: WebSocket, client_uid: str, data: WSMessage
+    ) -> None:
+        """Handle change client name"""
+        self.client_users[client_uid].client_name = data.get('client_name')
 
     async def _handle_group_info(
         self, websocket: WebSocket, client_uid: str, data: WSMessage
